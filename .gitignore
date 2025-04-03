@@ -20,3 +20,6 @@ doc
 .pydevproject
 _ext
 scene_videos/
+scene_videos_construction/
+scene_videos_overtake/
+selected_scenes/

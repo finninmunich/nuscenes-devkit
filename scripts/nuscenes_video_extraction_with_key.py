@@ -8,8 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from io import BytesIO
 from PIL import Image
-from concurrent.futures import ThreadPoolExecutor
-
+from tqdm import tqdm
 def render_sample_data(nusc, sample_data_token, output_image_path, with_anns=True, box_vis_level=BoxVisibility.ANY):
     # 获取传感器类型
     sd_record = nusc.get('sample_data', sample_data_token)
@@ -29,6 +28,9 @@ def render_sample_data(nusc, sample_data_token, output_image_path, with_anns=Tru
             for box in boxes:
                 c = np.array(nusc.explorer.get_color(box.name)) / 255.0
                 box.render(ax, view=camera_intrinsic, normalize=True, colors=(c, c, c))
+                # 在box上添加token
+                #corners = view_points(box.corners(), camera_intrinsic, normalize=True)[:2, :]
+                #ax.text(corners[0, 0], corners[1, 0], box.token, color='red', fontsize=8, bbox=dict(facecolor='white', alpha=0.5))
 
         ax.set_xlim(0, data.size[0])
         ax.set_ylim(data.size[1], 0)
@@ -64,16 +66,15 @@ def render_scene_to_images(nusc, scene_token, output_dir):
 
 def images_to_video(image_dir, output_video_path, fps=2):
     # 获取所有图像文件
-    images = [img for img in os.listdir(image_dir) if img.endswith(".jpg")]
+    images = [img for img in os.listdir(image_dir) if img.endswith(".jpg") and img != '000000.jpg']
     images.sort()
-
     # 读取第一张图像以获取视频尺寸
     first_image_path = os.path.join(image_dir, images[0])
     first_image = cv2.imread(first_image_path)
     height, width, _ = first_image.shape
 
     # 初始化视频写入器
-    fourcc = cv2.VideoWriter_fourcc(*'avc1')
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     video_writer = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height))
 
     # 写入每一帧图像
@@ -95,7 +96,7 @@ def process_scene(nusc, scene, output_dir):
     images_to_video(scene_output_dir, output_video_path)
     print(f"场景{scene['name']}渲染完成！")
 
-def main(version, dataroot, output_dir):
+def main(version, dataroot, output_dir,key='truck'):
     # 初始化NuScenes
     nusc = NuScenes(version=version, dataroot=dataroot, verbose=True)
 
@@ -103,17 +104,39 @@ def main(version, dataroot, output_dir):
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(os.path.join(output_dir, 'image'), exist_ok=True)
     os.makedirs(os.path.join(output_dir, 'videos'), exist_ok=True)
-    # 使用ThreadPoolExecutor并行处理每个场景
-    with ThreadPoolExecutor() as executor:
-        futures = [executor.submit(process_scene, nusc, scene, output_dir) for scene in nusc.scene]
-        for future in futures:
-            future.result()
+    target_scene = []
+    for scene in nusc.scene:
+        scene_description = scene['description']
+        if key == 'truck':
+            if 'truck' in scene_description or 'Truck' in scene_description:
+                target_scene.append(scene)
+        elif key == 'overtake':
+            if 'overtake' in scene_description or 'Overtake' in scene_description:
+                target_scene.append(scene)
+        elif key =='trailer':
+            if 'trailer' in scene_description or 'Trailer' in scene_description:
+                target_scene.append(scene)
+        elif key =='construction':
+            if 'construction vehicle' in scene_description or 'Construction vehicle' in scene_description:
+                target_scene.append(scene)
+        else:
+            raise ValueError("错误：未知的关键字！")
+
+    print(f"共有{len(target_scene)}个场景描述{key}。")
+    #     if 'overtake' in scene_description or 'Overtake' in scene_description:
+    #         target_scene.append(scene)
+    # print(f"共有{len(target_scene)}个场景描述超车。")
+
+    # 顺序处理每个场景
+    for scene in tqdm(target_scene):
+        process_scene(nusc, scene, output_dir)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="将NuScenes场景渲染为视频。")
     parser.add_argument('-v', '--version', type=str, default='v1.0-trainval', help='NuScenes数据集版本')
     parser.add_argument('-root', '--dataroot', type=str, default='/iag_ad_01/ad/finn/finn_data/nuscenes', help='NuScenes数据集路径')
     parser.add_argument('-o', '--output_dir', type=str, required=True, help='保存输出视频的目录')
+    parser.add_argument('-k', '--key', type=str, default=None, help='筛选场景的关键字')
 
     args = parser.parse_args()
-    main(args.version, args.dataroot, args.output_dir)
+    main(args.version, args.dataroot, args.output_dir,args.key)
